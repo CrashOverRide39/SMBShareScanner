@@ -1,0 +1,71 @@
+Install smbprotocol first
+
+pip install smbprotocol
+
+This is the python script:
+
+from smbprotocol.connection import Connection
+from smbprotocol.session import Session
+from smbprotocol.tree import TreeConnect
+from smbprotocol.open import Open
+from smbprotocol.file_info import FileInfo
+import re
+
+# Configuration
+server = "your_smb_server"
+share_name = "your_share_name"
+username = "your_username"
+password = "your_password"
+search_patterns = [r'password\s*=\s*["\'].*["\']', r'username\s*=\s*["\'].*["\']']
+
+def scan_smb_share(server, share_name, username, password, patterns):
+    # Establish SMB connection
+    connection = Connection(uuid="smb-uuid", username=username, password=password, server=server, port=445)
+    connection.connect()
+    session = Session(connection, username=username, password=password)
+    session.connect()
+
+    try:
+        # Connect to the share
+        tree = TreeConnect(session, f"\\\\{server}\\{share_name}")
+        tree.connect()
+        
+        # Open root directory of the share
+        root = Open(tree, "")
+        root.create()
+
+        # List files and directories to scan
+        files = root.query_directory()
+
+        for file_info in files:
+            filename = file_info.file_name
+            if file_info.is_directory:
+                print(f"Skipping directory: {filename}")
+                continue
+
+            # Open the file
+            smb_file = Open(tree, filename)
+            smb_file.create()
+            
+            # Read the file content
+            file_content = smb_file.read().decode("utf-8", errors="ignore")
+
+            # Search for patterns
+            for pattern in patterns:
+                matches = re.findall(pattern, file_content)
+                if matches:
+                    print(f"Potential hard-coded credentials found in file: {filename}")
+                    for match in matches:
+                        print(f"  Match: {match}")
+
+            smb_file.close()
+        
+        root.close()
+        tree.disconnect()
+
+    finally:
+        session.disconnect()
+        connection.disconnect()
+
+# Run the scan
+scan_smb_share(server, share_name, username, password, search_patterns)
